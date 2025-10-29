@@ -32,9 +32,15 @@ export default function RootLayout({
       <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
         <html lang="en">
           <head>
-            <title>Open Agent Builder</title>
+            <title>etc /buildagents by aizen</title>
             <meta name="description" content="Build AI agents and workflows with visual programming" />
             <link rel="icon" href="/favicon.png" />
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+            <link
+              href="https://fonts.googleapis.com/css2?family=Instrument+Serif&display=swap"
+              rel="stylesheet"
+            />
             <ColorStyles />
           </head>
           <body

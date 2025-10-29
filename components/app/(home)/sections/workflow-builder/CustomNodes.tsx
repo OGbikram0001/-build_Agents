@@ -180,7 +180,7 @@ export function CustomNode({ data, selected }: NodeProps) {
         outlineOffset: 0,
         boxShadow: 'none',
         transition: 'outline 0.2s ease-out, border 0.2s ease-out',
-        borderRadius: '16px',
+        borderRadius: '8px',
         minWidth: '140px',
         maxWidth: '240px',
         width: 'fit-content',
