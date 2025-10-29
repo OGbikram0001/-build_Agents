@@ -66,6 +66,9 @@ import { detectDuplicateCredentials } from "@/lib/workflow/duplicate-detection";
 import { cleanupInvalidEdges } from "@/lib/workflow/edge-cleanup";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import LeftSidebar from "./refactored/LeftSidebar";
+import RightSidebar from "./refactored/RightSidebar";
+import { useWorkflowManager } from "./refactored/useWorkflowManager";
 
 interface WorkflowBuilderProps {
   onBack: () => void;
@@ -237,23 +240,31 @@ const autoLayoutNodes = (nodes: Node[], edges: Edge[]) => {
 };
 
 function WorkflowBuilderInner({ onBack, initialWorkflowId, initialTemplateId }: WorkflowBuilderProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const [initialized, setInitialized] = useState(false);
-  const [currentTemplateId, setCurrentTemplateId] = useState<string | null>(initialTemplateId ?? null);
-
-  // Convex queries and mutations for templates
-  const template = useQuery(api.workflows.getTemplateByCustomId,
-    currentTemplateId ? { customId: currentTemplateId } : "skip"
-  );
-  const updateTemplateStructure = useMutation(api.workflows.updateTemplateStructure);
-
-  // Function to seed templates via API
-  const seedTemplates = async () => {
-    const response = await fetch('/api/templates/seed', { method: 'POST' });
-    const data = await response.json();
-    return data;
-  };
+  const {
+    nodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    setNodes,
+    setEdges,
+    workflow,
+    convexId,
+    isRunning,
+    nodeResults,
+    execution,
+    currentNodeId,
+    pendingAuth,
+    runWorkflow,
+    stopWorkflow,
+    resumeWorkflow,
+    saveWorkflow,
+    saveWorkflowImmediate,
+    deleteWorkflow,
+    createNewWorkflow,
+    screenToFlowPosition,
+    getNode,
+    setCenter,
+  } = useWorkflowManager(initialWorkflowId, initialTemplateId);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [showExecution, setShowExecution] = useState(false);
@@ -287,75 +298,6 @@ function WorkflowBuilderInner({ onBack, initialWorkflowId, initialTemplateId }: 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, getNode, setCenter } = useReactFlow();
 
-  // Workflow management
-  const { workflow, convexId, updateNodes, updateEdges, saveWorkflow, saveWorkflowImmediate, deleteWorkflow, createNewWorkflow } = useWorkflow(initialWorkflowId || undefined);
-
-  // AUTO-SAVE DISABLED - Use manual Save button instead
-  // Smart auto-save: only save when nodes/edges actually change, with debounce
-  // const lastSavedNodesRef = useRef<string>('');
-  // const lastSavedEdgesRef = useRef<string>('');
-  // const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // useEffect(() => {
-  //   if (!initialized || !workflow) return;
-
-  //   const nodesJson = JSON.stringify(nodes);
-  //   const edgesJson = JSON.stringify(edges);
-
-  //   // Only save if something actually changed
-  //   if (nodesJson === lastSavedNodesRef.current && edgesJson === lastSavedEdgesRef.current) {
-  //     return;
-  //   }
-
-  //   // Clear previous timeout
-  //   if (autoSaveTimeoutRef.current) {
-  //     clearTimeout(autoSaveTimeoutRef.current);
-  //   }
-
-  //   // Debounced save
-  //   autoSaveTimeoutRef.current = setTimeout(async () => {
-  //     console.log('🔄 [AUTO-SYNC] Saving changes to Convex...', {
-  //       nodeCount: nodes.length,
-  //       edgeCount: edges.length,
-  //       isTemplate: workflow.isTemplate,
-  //       templateId: currentTemplateId,
-  //     });
-
-  //     // Update refs BEFORE saving to prevent loops
-  //     lastSavedNodesRef.current = nodesJson;
-  //     lastSavedEdgesRef.current = edgesJson;
-
-  //     // If this is a template-based workflow, also save to the template
-  //     if (workflow.isTemplate && currentTemplateId) {
-  //       try {
-  //         await updateTemplateStructure({
-  //           customId: currentTemplateId,
-  //           nodes: nodes.map(n => ({
-  //             ...n,
-  //             data: {
-  //               ...n.data,
-  //               nodeType: n.data?.nodeType || n.type,
-  //             }
-  //           })),
-  //           edges,
-  //         });
-  //         console.log('✅ Template structure updated in Convex');
-  //       } catch (error) {
-  //         console.error('Failed to update template structure:', error);
-  //       }
-  //     }
-
-  //     // Save to workflow (regular save)
-  //     saveWorkflow({ nodes, edges });
-  //   }, 1500); // 1.5 second debounce
-
-  //   return () => {
-  //     if (autoSaveTimeoutRef.current) {
-  //       clearTimeout(autoSaveTimeoutRef.current);
-  //     }
-  //   };
-  // }, [nodes, edges, initialized, currentTemplateId, updateTemplateStructure]); // Don't include workflow or saveWorkflow to prevent loops
-
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (workflowMenuRef.current && !workflowMenuRef.current.contains(event.target as any)) {
@@ -371,233 +313,10 @@ function WorkflowBuilderInner({ onBack, initialWorkflowId, initialTemplateId }: 
     setShowTestEndpoint(false); // Close API panel when switching workflows
   }, [workflow?.id]);
 
-  const handleDuplicateWorkflow = useCallback(() => {
-    if (!workflow) return;
-    const original = workflow;
-    const newWorkflow = createNewWorkflow();
-    setShowWorkflowMenu(false);
-    // Allow state to update before saving copied structure
-    setTimeout(() => {
-      saveWorkflow({
-        name: `${original.name || 'Workflow'} Copy`,
-        description: original.description,
-        nodes: original.nodes,
-        edges: original.edges,
-      });
-      toast.success('Workflow duplicated');
-    }, 0);
-  }, [workflow, createNewWorkflow, saveWorkflow, setShowWorkflowMenu]);
-
   const handleRenameWorkflow = useCallback(() => {
     setRenameTrigger(prev => prev + 1);
     setShowWorkflowMenu(false);
   }, [setRenameTrigger, setShowWorkflowMenu]);
-
-  const handleSaveWorkflowImmediate = useCallback(() => {
-    if (!workflow) {
-      console.error('❌ Cannot save: no workflow exists');
-      return;
-    }
-
-    console.log('💾 [MANUAL SAVE] Saving workflow with', nodes.length, 'nodes and', edges.length, 'edges');
-
-    const updatedWorkflow = {
-      ...workflow,
-      nodes: nodes.map(n => ({
-        ...n,
-        type: n.type || 'default',
-        data: {
-          ...n.data,
-          label: typeof n.data.label === 'string' ? n.data.label : 'Node',
-          nodeType: n.data.nodeType || n.type, // Ensure nodeType is preserved
-        },
-      })) as any,
-      edges: edges as any,
-    };
-
-    saveWorkflow(updatedWorkflow);
-    toast.success('Workflow saved', {
-      description: `Saved ${nodes.length} nodes to Convex`,
-    });
-    setShowShareModal(true);
-    setShowWorkflowMenu(false);
-  }, [workflow, nodes, edges, saveWorkflow, setShowShareModal, setShowWorkflowMenu]);
-
-  const handleClearCanvas = useCallback(() => {
-    setConfirmDialog({
-      isOpen: true,
-      title: 'Clear Canvas',
-      description: 'This will remove all nodes and reset to the default workflow. This action cannot be undone.',
-      variant: 'warning',
-      onConfirm: () => {
-        setNodes(initialNodes);
-        setEdges(initialEdges);
-        setSelectedNode(null);
-        // Reset node ID counter to initial state
-        resetNodeIdCounter(initialNodes);
-        toast.success('Canvas cleared', {
-          description: 'Workflow reset to default',
-        });
-      },
-    });
-    setShowWorkflowMenu(false);
-  }, [setConfirmDialog, setNodes, setEdges, setSelectedNode, setShowWorkflowMenu]);
-
-  const confirmDeleteWorkflow = useCallback(() => {
-    if (!workflow) return;
-    setConfirmDialog({
-      isOpen: true,
-      title: 'Delete Workflow',
-      description: 'This will permanently delete the current workflow. This action cannot be undone.',
-      variant: 'danger',
-      onConfirm: () => {
-        deleteWorkflow(workflow.id);
-        toast.success('Workflow deleted');
-      },
-    });
-    setShowWorkflowMenu(false);
-  }, [workflow, deleteWorkflow, setConfirmDialog, setShowWorkflowMenu]);
-  const { runWorkflow, stopWorkflow, isRunning, nodeResults, execution, currentNodeId, pendingAuth, resumeWorkflow } = useWorkflowExecution();
-
-  // Load template or workflow on mount
-  useEffect(() => {
-    if (initialized) return;
-
-    if (initialTemplateId) {
-      // Check if template is loading from Convex
-      if (template === undefined) {
-        // Still loading from Convex
-        return;
-      }
-
-      // If template is null, it doesn't exist in Convex yet - seed templates
-      if (template === null) {
-        console.log('Template not found in Convex, seeding templates...');
-        seedTemplates()
-          .then(() => {
-            console.log('Templates seeded successfully');
-            // The component will re-render when the template query updates
-          })
-          .catch(err => {
-            console.error('Failed to seed templates:', err);
-            toast.error('Failed to load template');
-          });
-        return;
-      }
-
-      if (template) {
-        console.log('Loading template from Convex:', template);
-
-        // Clean up any invalid edges in the template
-        const cleaned = cleanupInvalidEdges(template.nodes, template.edges);
-        const cleanedNodes = cleaned.nodes;
-        const cleanedEdges = cleaned.edges;
-
-        if (cleaned.removedCount > 0) {
-          console.warn(`🧹 Removed ${cleaned.removedCount} invalid edge(s) from template`);
-          toast.warning(`Template had ${cleaned.removedCount} invalid connection(s)`, {
-            description: 'These have been automatically removed',
-          });
-        }
-
-        // Convert template nodes to React Flow format
-        const templateNodes = cleanedNodes.map((n: any) => {
-          const nodeData = n.data as any;
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              label: createNodeLabel(nodeData.nodeName || nodeData.label as string, getNodeColor(n.type), n.type),
-            },
-          };
-        });
-
-        console.log('Template nodes with icons:', templateNodes.map(n => ({ id: n.id, label: n.data.label })));
-
-        // Apply auto-layout for even spacing
-        const layoutedNodes = autoLayoutNodes(templateNodes as any, cleanedEdges as any);
-        setNodes(layoutedNodes as any);
-        setEdges(cleanedEdges as any);
-
-        // Reset node ID counter based on loaded nodes to prevent duplicates
-        resetNodeIdCounter(layoutedNodes as any);
-
-        // Save template as a new workflow with all node data intact
-        // Ensure nodes have proper nodeType for LangGraph compatibility
-        const workflowNodes = template.nodes.map((n: any) => ({
-          ...n,
-          data: {
-            ...n.data,
-            nodeType: n.data.nodeType || n.type, // Ensure nodeType is set
-          }
-        }));
-
-        // Generate a unique workflow ID for this template instance
-        const workflowId = `workflow_${Date.now()}_${template.id}`;
-
-        saveWorkflow({
-          id: workflowId,
-          name: template.name,
-          description: template.description,
-          nodes: workflowNodes,
-          edges: template.edges,
-        });
-
-        setInitialized(true);
-      }
-    } else if (initialWorkflowId && workflow && !initialized) {
-      // Use workflow data from useWorkflow hook (loaded via API)
-      console.log('Loading workflow from hook:', {
-        id: workflow.id,
-        name: workflow.name,
-        nodeCount: workflow.nodes?.length,
-        nodes: workflow.nodes?.map((n: any) => ({ id: n.id, type: n.type }))
-      });
-
-      // Clean up any invalid edges before rendering
-      const cleaned = cleanupInvalidEdges(workflow.nodes, workflow.edges);
-      const cleanedNodes = cleaned.nodes;
-      const cleanedEdges = cleaned.edges;
-
-      if (cleaned.removedCount > 0) {
-        console.warn(`🧹 Removed ${cleaned.removedCount} invalid edge(s) from workflow`);
-        toast.warning(`Workflow had ${cleaned.removedCount} invalid connection(s)`, {
-          description: 'These have been automatically removed',
-        });
-      }
-
-      // Convert workflow nodes to React Flow format
-      const workflowNodes = cleanedNodes.map(n => {
-        const nodeData = n.data as any;
-        // Get the label text (not React element)
-        const labelText = nodeData.nodeName || nodeData.label || n.type;
-
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            // Create the label JSX element
-            label: createNodeLabel(labelText, getNodeColor(n.type), n.type),
-          },
-        };
-      });
-
-      // Apply auto-layout for even spacing
-      const layoutedNodes = autoLayoutNodes(workflowNodes as any, cleanedEdges as any);
-      console.log('Setting nodes to:', layoutedNodes.length, 'nodes');
-      setNodes(layoutedNodes as any);
-      setEdges(cleanedEdges as any);
-
-      // Reset node ID counter based on loaded nodes to prevent duplicates
-      resetNodeIdCounter(layoutedNodes as any);
-
-      setInitialized(true);
-    } else if (!initialized && !initialTemplateId && !initialWorkflowId) {
-      setInitialized(true);
-      // For new workflows, don't select any node by default
-      // User can click the start node or drag new nodes to build their workflow
-    }
-  }, [initialTemplateId, initialWorkflowId, initialized, setNodes, setEdges, saveWorkflow, template, seedTemplates, workflow]);
 
   const createNodeLabel = (label: string, color: string, nodeType?: string) => {
     // Get icon for this node type
@@ -1161,202 +880,6 @@ function WorkflowBuilderInner({ onBack, initialWorkflowId, initialTemplateId }: 
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [selectedNode, selectedEdgeId, nodes, edges, handleDeleteNode, setNodes, setEdges, isRunning, handleAutoArrange]);
 
-  const handleRunWithInput = useCallback(async (input: string) => {
-    console.log('📍 handleRunWithInput called with input:', input);
-
-    if (!workflow) {
-      console.error('❌ No workflow to run');
-      return;
-    }
-
-    console.log('✅ Workflow exists:', workflow.name);
-
-    // Save the workflow before running to ensure it exists in Convex
-    console.log('💾 Saving workflow before execution...');
-    toast.info('Saving workflow...', { duration: 1000 });
-
-    const saveSuccess = await saveWorkflowImmediate({
-      nodes: nodes.map(n => ({
-        ...n,
-        type: n.type || 'default',
-        data: {
-          ...n.data,
-          label: typeof n.data.label === 'string' ? n.data.label : 'Node',
-          nodeType: n.data.nodeType || n.type,
-        },
-      })) as any,
-      edges: edges as any,
-    });
-
-    if (!saveSuccess) {
-      toast.error('Failed to save workflow', {
-        description: 'Cannot run workflow until it is saved',
-      });
-      return;
-    }
-
-    // Create a fresh workflow object with current nodes/edges
-    const currentWorkflow = {
-      ...workflow,
-      nodes: nodes.map(n => ({
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: n.data,
-      })) as any,
-      edges: edges.map(e => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-        label: e.label,
-      })) as any,
-    };
-
-    console.log('🏃 Running workflow with', currentWorkflow.nodes.length, 'nodes');
-    await runWorkflow(currentWorkflow, input);
-  }, [workflow, nodes, edges, runWorkflow, saveWorkflowImmediate]);
-
-
-
-  const handleShowTestAPI = useCallback(() => {
-    // Save workflow before opening API panel
-    if (workflow) {
-      saveWorkflow({
-        nodes: nodes.map(n => ({
-          ...n,
-          type: n.type || 'default',
-          data: {
-            ...n.data,
-            label: typeof n.data.label === 'string' ? n.data.label : 'Node',
-          },
-        })) as any,
-        edges: edges as any,
-      });
-    }
-    setShowPreview(false);
-    setShowExecution(false);
-    setSelectedNode(null); // Close node panel
-    setShowTestEndpoint(true);
-  }, [workflow, nodes, edges, saveWorkflow]);
-
-  const handleSaveWorkflow = useCallback(() => {
-    if (!workflow) {
-      toast.error('No workflow to save');
-      return;
-    }
-
-    // Serialize nodes by removing React elements (labels) and keeping only data
-    const serializedNodes = nodes.map(n => ({
-      ...n,
-      data: {
-        ...n.data,
-        // Don't save the React element label - save the text/name instead
-        label: n.data.nodeName || n.type, // Save simple text, not JSX
-        nodeType: n.data.nodeType || n.type, // Ensure nodeType is saved
-      },
-    }));
-
-    console.log('💾 Saving', serializedNodes.length, 'serialized nodes');
-
-    // Force immediate save with all current data
-    saveWorkflow({
-      nodes: serializedNodes as unknown as WorkflowNode[],
-      edges: edges as unknown as WorkflowEdge[],
-      name: workflow.name,
-      description: workflow.description,
-    });
-
-    toast.success('Workflow saved', {
-      description: `${nodes.length} nodes, ${edges.length} connections saved to Convex`,
-    });
-  }, [workflow, nodes, edges, saveWorkflow]);
-
-  const handleUpdateNodeData = useCallback((nodeId: string, data: any) => {
-    try {
-      setNodes((nds) => {
-        const updated = nds.map((node) => {
-          if (node.id === nodeId) {
-            const updatedData = {
-              ...node.data,
-              ...data,
-            };
-
-            // If name is being updated, also update the label
-            if (data.name && data.name !== (node.data as any).nodeName) {
-              const nodeType = (node.data as any).nodeType;
-
-              // Find the node configuration to get the icon and color
-              let IconComponent: any = null;
-              let color = "bg-gray-500";
-
-              for (const category of nodeCategories) {
-                const nodeConfig = category.nodes.find(n => n.type === nodeType);
-                if (nodeConfig) {
-                  IconComponent = nodeConfig.icon;
-                  color = nodeConfig.color;
-                  break;
-                }
-              }
-
-              // Create the new label with the updated name
-              updatedData.label = (
-                <div className="flex items-center gap-8">
-                  <div className={`w-32 h-32 rounded-8 ${color} flex items-center justify-center flex-shrink-0`}>
-                    {IconComponent ? (
-                      <IconComponent className="w-18 h-18 text-white" strokeWidth={2} />
-                    ) : (
-                      <div className="w-16 h-16 bg-white rounded-2" />
-                    )}
-                  </div>
-                  <span className="text-sm font-medium text-[#18181b]">{data.name}</span>
-                </div>
-              );
-            }
-
-            return {
-              ...node,
-              data: updatedData,
-            };
-          }
-          return node;
-        });
-
-        // Immediately persist to Convex after updating React state
-        if (workflow) {
-          updateNodes(updated as any);
-        }
-
-        return updated;
-      });
-    } catch (error) {
-      console.error('Error updating node data:', error);
-      toast.error('Failed to update node', {
-        description: error instanceof Error ? error.message : 'Unable to save node changes',
-      });
-    }
-  }, [setNodes, workflow, updateNodes]);
-
-  // Inject onUpdate callback into note nodes for inline editing
-  useEffect(() => {
-    setNodes((nds) =>
-      nds.map((node) => {
-        const nodeType = (node.data as any)?.nodeType;
-        if (nodeType === 'note' && !(node.data as any).onUpdate) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              onUpdate: (updates: any) => handleUpdateNodeData(node.id, updates),
-            },
-          };
-        }
-        return node;
-      })
-    );
-  }, [nodes.length]); // Only re-run when node count changes
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -1564,60 +1087,10 @@ function WorkflowBuilderInner({ onBack, initialWorkflowId, initialTemplateId }: 
       </motion.div>
 
       <div className="flex flex-1">
-        {/* Left Sidebar */}
-        <motion.aside
-          initial={{ x: -300, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="w-200 lg:w-200 md:w-180 sm:w-160 m-20 rounded-16 border border-border-faint bg-accent-white p-16 shadow-lg flex-shrink-0 z-10 self-start max-h-[calc(100vh-80px)] overflow-y-auto"
-        >
-        <div className="mb-24">
-          <button
-            onClick={onBack}
-            className="text-body-small text-black-alpha-48 hover:text-accent-black transition-colors flex items-center gap-8"
-          >
-            <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back
-          </button>
-        </div>
+        <LeftSidebar onBack={onBack} onDragStart={onDragStart} />
 
-        {/* Node Types */}
-        <div className="space-y-12">
-          {nodeCategories.map((category) => (
-            <div key={category.category}>
-              <h3 className="text-xs font-semibold text-black-alpha-64 uppercase tracking-wide mb-8">
-                {category.category}
-              </h3>
-              <div className="space-y-2">
-                {category.nodes.map((node) => {
-                  const Icon = node.icon;
-                  return (
-                    <motion.div
-                      key={node.type}
-                      draggable
-                      onDragStart={(e) => onDragStart(e as any, node.type, node.label, node.color)}
-                      className="rounded-8 px-10 py-8 hover:bg-black-alpha-4 transition-all cursor-move flex items-center gap-10"
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <div className={`w-24 h-24 rounded-6 ${node.color} flex items-center justify-center flex-shrink-0`}>
-                        <Icon className="w-14 h-14 text-white" strokeWidth={2.5} />
-                      </div>
-                      <span className="text-sm font-medium text-accent-black">{node.label}</span>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-32" />
-      </motion.aside>
-
-      {/* Main Canvas */}
-      <motion.main
+        {/* Main Canvas */}
+        <motion.main
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5, delay: 0.3 }}
@@ -1662,125 +1135,19 @@ function WorkflowBuilderInner({ onBack, initialWorkflowId, initialTemplateId }: 
 
       </motion.main>
 
-        {/* Right Side Panels */}
-        {showTestEndpoint && workflow ? (
-          <TestEndpointPanel
-            key={workflow.id}
-            workflowId={workflow.id}
-            workflow={{
-              ...workflow,
-              nodes: nodes.map(n => ({
-                id: n.id,
-                type: n.type,
-                position: n.position,
-                data: n.data,
-              })) as any,
-            }}
-            environment={environment}
-            onClose={() => setShowTestEndpoint(false)}
-          />
-        ) : showExecution ? (
-          <ExecutionPanel
-            workflow={workflow ? {
-              ...workflow,
-              nodes: nodes.map(n => ({
-                id: n.id,
-                type: n.type,
-                position: n.position,
-                data: n.data,
-              })) as any,
-            } : null}
-            execution={execution}
-            nodeResults={nodeResults}
-            isRunning={isRunning}
-            currentNodeId={currentNodeId}
-            onRun={handleRunWithInput}
-            onResumePendingAuth={resumeWorkflow}
-            onClose={() => setShowExecution(false)}
-            environment={environment}
-            pendingAuth={pendingAuth}
-          />
-        ) : showPreview ? (
-          <PreviewPanel
-            execution={execution}
-            nodeResults={nodeResults}
-            isRunning={isRunning}
-            onClose={() => setShowPreview(false)}
-          />
-        ) : (selectedNode?.data as any)?.nodeType === 'mcp' ? (
-          <MCPPanel
-            node={selectedNode}
-            mode="configure"
-            onClose={() => setSelectedNode(null)}
-            onUpdate={handleUpdateNodeData}
-          />
-        ) : (selectedNode?.data as any)?.nodeType?.includes('if') || (selectedNode?.data as any)?.nodeType?.includes('while') || (selectedNode?.data as any)?.nodeType?.includes('approval') ? (
-          <LogicNodePanel
-            node={selectedNode}
-            nodes={nodes}
-            onClose={() => setSelectedNode(null)}
-            onDelete={handleDeleteNode}
-            onUpdate={handleUpdateNodeData}
-          />
-        ) : (selectedNode?.data as any)?.nodeType?.includes('transform') ? (
-          <DataNodePanel
-            node={selectedNode}
-            nodes={nodes}
-            onClose={() => setSelectedNode(null)}
-            onDelete={handleDeleteNode}
-            onUpdate={handleUpdateNodeData}
-          />
-        ) : (selectedNode?.data as any)?.nodeType === 'extract' ? (
-          <ExtractNodePanel
-            node={selectedNode}
-            nodes={nodes}
-            onClose={() => setSelectedNode(null)}
-            onDelete={handleDeleteNode}
-            onUpdate={handleUpdateNodeData}
-          />
-        ) : (selectedNode?.data as any)?.nodeType === 'http' ? (
-          <HTTPNodePanel
-            node={selectedNode}
-            nodes={nodes}
-            onClose={() => setSelectedNode(null)}
-            onDelete={handleDeleteNode}
-            onUpdate={handleUpdateNodeData}
-          />
-        ) : (selectedNode?.data as any)?.nodeType?.includes('set-state') ? (
-          <DataNodePanel
-            node={selectedNode}
-            nodes={nodes}
-            onClose={() => setSelectedNode(null)}
-            onDelete={handleDeleteNode}
-            onUpdate={handleUpdateNodeData}
-          />
-        ) : (selectedNode?.data as any)?.nodeType === 'start' ? (
-          <StartNodePanel
-            node={selectedNode}
-            onClose={() => setSelectedNode(null)}
-            onUpdate={handleUpdateNodeData}
-          />
-        ) : (selectedNode?.data as any)?.nodeType !== 'end' && (selectedNode?.data as any)?.nodeType !== 'note' && selectedNode ? (
-          <NodePanel
-            nodeData={{
-              id: selectedNode.id,
-              label: (selectedNode.data as any).nodeName || 'Agent',
-              type: (selectedNode.data as any).nodeType || 'agent',
-            }}
-            nodes={nodes}
-            onClose={() => setSelectedNode(null)}
-            onAddMCP={() => {
-              setTargetAgentForMCP(selectedNode);
-              setShowMCPSelector(true);
-            }}
-            onDelete={handleDeleteNode}
-            onUpdate={handleUpdateNodeData}
-            onOpenSettings={() => setShowSettings(true)}
-          />
-        ) : null}
+      <RightSidebar
+        selectedNode={selectedNode}
+        nodes={nodes}
+        setSelectedNode={setSelectedNode}
+        handleDeleteNode={handleDeleteNode}
+        handleUpdateNodeData={handleUpdateNodeData}
+        setTargetAgentForMCP={setTargetAgentForMCP}
+        setShowMCPSelector={setShowMCPSelector}
+        setShowSettings={setShowSettings}
+      />
 
-        {/* MCP Selector for adding to agents */}
-        {showMCPSelector && (
+      {/* MCP Selector for adding to agents */}
+      {showMCPSelector && (
           <MCPPanel
             node={null}
             mode="add-to-agent"
