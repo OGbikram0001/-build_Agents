@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import DocChatInputField from "@/components/shared/doc-chat-input-field";
 
 export default function LivePreviewFrame({
   sessionId,
@@ -20,6 +21,18 @@ export default function LivePreviewFrame({
   const idleMoveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
+  const [docChatInput, setDocChatInput] = useState('');
+
+  const handleDocChatInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setDocChatInput(event.target.value);
+  };
+
+  const handleDocChatInputClick = () => {
+    // This is where the logic for the AI chat functionality will go.
+    // For now, I'll just log the input value to the console.
+    console.log(docChatInput);
+  };
+
   const [cursorPosition, setCursorPosition] = useState<{
     x: number;
     y: number;
@@ -337,6 +350,14 @@ export default function LivePreviewFrame({
           backgroundColor: "#f0f0f0",
         }}
       />
+      {/* Document Chat Input Field */}
+      <div className="absolute bottom-0 left-0 w-full z-20">
+        <DocChatInputField
+          onChange={handleDocChatInputChange}
+          onClick={handleDocChatInputClick}
+          value={docChatInput}
+        />
+      </div>
     </div>
   );
 }
